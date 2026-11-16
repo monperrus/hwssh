@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hwssh"
+version = "0.1.0"
+description = "Accept only SSH keys provably generated inside FIDO2 hardware, via verified attestation"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "Martin Monperrus" }]
+dependencies = ["cryptography>=43", "fido2>=1.1"]
+
+[project.scripts]
+hwssh = "hwssh.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "mypy", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hwssh"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]

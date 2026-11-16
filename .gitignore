@@ -2,3 +2,6 @@ plan-*.md
 __pycache__/
 *.egg-info/
 .venv/
+tests/e2e/registry/
+tests/e2e/plain_authorized_keys
+tests/fixtures/*/id_ed25519_sk

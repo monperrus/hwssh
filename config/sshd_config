@@ -1,0 +1,30 @@
+# sshd that only admits FIDO2 keys whose hardware attestation verifies (hwssh).
+# Every other way in is closed; keys come only from the attested registry.
+
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Only public-key auth, only FIDO (sk-*) algorithms, PIN/biometric on every login.
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PubkeyAcceptedAlgorithms sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com
+PubkeyAuthOptions verify-required
+
+# Keys come only from the registry, re-verified at each login; no files users can write.
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/hwssh authorized-keys /etc/hwssh/registry %u
+AuthorizedKeysCommandUser nobody
+TrustedUserCAKeys none
+AuthorizedPrincipalsFile none
+
+# Everything else off.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+HostbasedAuthentication no
+GSSAPIAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+PermitUserEnvironment no
+UsePAM no
+
+Subsystem sftp internal-sftp
