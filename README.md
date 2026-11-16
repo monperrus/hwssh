@@ -25,13 +25,15 @@ ssh-keygen -t ed25519-sk -O verify-required \
 Server:
 
 ```sh
-hwssh enroll /etc/hwssh/registry alice id_ed25519_sk.pub attest.bin chal.bin
-hwssh verify-registry /etc/hwssh/registry          # audit: silent when every entry holds
-hwssh verify id_ed25519_sk.pub attest.bin chal.bin --json   # one-off check
+hwssh mds-update /var/lib/hwssh/mds.jwt            # FIDO metadata; run daily (cron)
+hwssh enroll --mds /var/lib/hwssh/mds.jwt /etc/hwssh/registry alice id_ed25519_sk.pub attest.bin chal.bin
+hwssh verify-registry --mds /var/lib/hwssh/mds.jwt /etc/hwssh/registry   # audit: silent when all hold
+hwssh verify id_ed25519_sk.pub attest.bin chal.bin --json                # one-off check
 ```
 
 sshd: use [`config/sshd_config`](config/sshd_config). Keys come only from
 `AuthorizedKeysCommand hwssh authorized-keys`, which re-verifies each entry at every login;
+without a fresh FIDO metadata blob no key is served (fail closed);
 `AuthorizedKeysFile none`, passwords, keyboard-interactive and non-`sk` algorithms are off,
 and `PubkeyAuthOptions verify-required` demands PIN/biometric on every login.
 
@@ -46,6 +48,12 @@ proven, and take `--json`.
 3. The credential public key in `authData` is the SSH public key, for the same application.
 4. User presence is set (user verification too with `--require-uv`).
 5. The certificate's AAGUID, when present, equals the one in `authData`.
+6. With `--mds`: the [FIDO Alliance Metadata Service](https://fidoalliance.org/metadata/) blob
+   is signed by `mds.fidoalliance.org` (chain to pinned GlobalSign Root CA - R3) and not past its
+   `nextUpdate`; it lists the AAGUID, lists a certificate of the attestation path for that
+   AAGUID, and reports no compromise (`REVOKED`, `ATTESTATION_KEY_COMPROMISE`,
+   `USER_VERIFICATION_BYPASS`, `USER_KEY_*_COMPROMISE`). This is an independent check of the
+   pinned vendor roots: `tests/test_mds.py` asserts every pinned Yubico certificate is listed.
 
 ## What is not proven
 
@@ -53,6 +61,7 @@ proven, and take `--json`.
   attestation is a vendor statement about a device model, not an audit of its code.
 - Independence from the vendor: a leaked or misused vendor attestation key breaks the proof.
 - Identity of the device: FIDO batch attestation shares one certificate across many devices.
+- Revocation of individual certificates: CRLs of the vendor and MDS chains are not fetched.
 - Freshness: the challenge binds the attestation to the enrollment, but hwssh does not
   track which challenges it issued.
 
@@ -60,7 +69,8 @@ proven, and take `--json`.
 
 ```sh
 uv sync
-uv run pytest                     # synthetic CA positives/negatives (+ real key if captured)
+uv run hwssh mds-update tests/fixtures/mds.jwt   # real FIDO metadata for tests (git-ignored)
+uv run pytest                     # synthetic CA positives/negatives, real key and real MDS
 tests/fixtures/capture.sh         # capture a real YubiKey attestation (touch + PIN)
 tests/e2e/run.sh                  # docker sshd: password, plain key, forged entry refused
 tests/e2e/run.sh --hardware       # ... and the YubiKey logs in (touch + PIN)

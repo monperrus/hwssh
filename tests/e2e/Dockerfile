@@ -16,7 +16,8 @@ COPY config/sshd_config /etc/ssh/sshd_config
 RUN useradd -m -s /bin/bash alice && echo 'alice:hunter2' | chpasswd \
  && mkdir -p /etc/hwssh/registry
 COPY tests/e2e/registry/ /etc/hwssh/registry/
+COPY tests/fixtures/mds.jwt /var/lib/hwssh/mds.jwt
 COPY tests/e2e/plain_authorized_keys /home/alice/.ssh/authorized_keys
-RUN chown -R alice /home/alice/.ssh && chmod -R a+rX,go-w /etc/hwssh && sshd -t
+RUN chown -R alice /home/alice/.ssh && chmod -R a+rX,go-w /etc/hwssh /var/lib/hwssh && sshd -t
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D", "-e"]

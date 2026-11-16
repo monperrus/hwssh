@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import datetime
 import hashlib
+import json
 import struct
 import uuid
 from dataclasses import dataclass
@@ -116,3 +117,47 @@ def enroll(
     keyblob = s(ED25519_SK.encode()) + s(pub) + s(application.encode())
     line = f"{ED25519_SK} {base64.b64encode(keyblob).decode()} test"
     return Enrollment(line, blob, challenge)
+
+
+def _b64u(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def make_mds(
+    vendor: Vendor,
+    signer_name: str = "mds.fidoalliance.org",
+    status: str = "FIDO_CERTIFIED_L2",
+    aaguid: uuid.UUID = AAGUID,
+    listed: x509.Certificate | None = None,
+    next_update: str = "2026-12-01",
+) -> tuple[bytes, x509.Certificate]:
+    """A synthetic MDS3 JWT (ES256) and the root that signs it."""
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+    rk = ec.generate_private_key(ec.SECP256R1())
+    root = _cert("MDS Root", "MDS Root", rk.public_key(), rk, ca=True)
+    sk = ec.generate_private_key(ec.SECP256R1())
+    leaf = (
+        x509.CertificateBuilder()
+        .subject_name(_name(signer_name))
+        .issuer_name(_name("MDS Root"))
+        .public_key(sk.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - datetime.timedelta(days=30))
+        .not_valid_after(NOW + datetime.timedelta(days=365))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(signer_name)]), critical=False)
+        .sign(rk, hashes.SHA256())
+    )
+    header = {"alg": "ES256", "typ": "JWT",
+              "x5c": [base64.b64encode(leaf.public_bytes(serialization.Encoding.DER)).decode()]}
+    der = (listed or vendor.root).public_bytes(serialization.Encoding.DER)
+    payload = {"no": 1, "nextUpdate": next_update, "entries": [{
+        "aaguid": str(aaguid),
+        "metadataStatement": {"description": "Test Authenticator",
+                              "attestationRootCertificates": [base64.b64encode(der).decode()]},
+        "statusReports": [{"status": "FIDO_CERTIFIED"}, {"status": status}],
+    }]}
+    signed = f"{_b64u(json.dumps(header).encode())}.{_b64u(json.dumps(payload).encode())}"
+    r, s_ = decode_dss_signature(sk.sign(signed.encode(), ec.ECDSA(hashes.SHA256())))
+    sig = r.to_bytes(32) + s_.to_bytes(32)
+    return f"{signed}.{_b64u(sig)}".encode(), root

@@ -10,9 +10,11 @@ PubkeyAuthentication yes
 PubkeyAcceptedAlgorithms sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com
 PubkeyAuthOptions verify-required
 
-# Keys come only from the registry, re-verified at each login; no files users can write.
+# Keys come only from the registry, re-verified at each login against the pinned vendor roots
+# and the FIDO metadata blob (refresh daily: hwssh mds-update /var/lib/hwssh/mds.jwt).
+# No blob, or a stale one, means no key is served: fail closed.
 AuthorizedKeysFile none
-AuthorizedKeysCommand /usr/local/bin/hwssh authorized-keys /etc/hwssh/registry %u
+AuthorizedKeysCommand /usr/local/bin/hwssh authorized-keys --mds /var/lib/hwssh/mds.jwt /etc/hwssh/registry %u
 AuthorizedKeysCommandUser nobody
 TrustedUserCAKeys none
 AuthorizedPrincipalsFile none

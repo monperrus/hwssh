@@ -20,13 +20,17 @@ import struct
 import uuid
 from dataclasses import dataclass, field
 from importlib import resources
+from typing import TYPE_CHECKING
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from fido2 import cbor
 from fido2.webauthn import AuthenticatorData
+
+if TYPE_CHECKING:
+    from hwssh._mds import Mds
 
 ATTEST_MAGIC = b"ssh-sk-attest-v01"
 ED25519_SK = "sk-ssh-ed25519@openssh.com"
@@ -79,6 +83,7 @@ class VerifiedKey:
     aaguid: str
     chain: list[str]  # subject CNs, leaf first, root last
     user_verified: bool
+    model: str | None = None  # description from FIDO metadata, when checked
 
 
 def _read_string(buf: bytes, off: int) -> tuple[bytes, int]:
@@ -219,8 +224,11 @@ def verify_attestation(
     store: TrustStore | None = None,
     require_uv: bool = False,
     at: datetime.datetime | None = None,
+    mds: Mds | None = None,
 ) -> VerifiedKey:
-    """Verify that `pubkey` was generated in hardware attested by `attestation`."""
+    """Verify that `pubkey` was generated in hardware attested by `attestation`.
+
+    With `mds`, the authenticator model must also be listed, uncompromised, in FIDO metadata."""
     store = store or TrustStore.builtin()
     at = at or datetime.datetime.now(datetime.UTC)
     key = parse_sk_public_key(pubkey)
@@ -262,9 +270,14 @@ def verify_attestation(
     if cert_aaguid is not None and cert_aaguid != bytes(cred.aaguid):
         raise AttestationError("AAGUID in certificate differs from authenticator data")
 
+    aaguid = str(uuid.UUID(bytes=bytes(cred.aaguid)))
+    model = None
+    if mds is not None:
+        model = mds.check(aaguid, [c.public_bytes(serialization.Encoding.DER) for c in path])
     return VerifiedKey(
         key=key,
-        aaguid=str(uuid.UUID(bytes=bytes(cred.aaguid))),
+        aaguid=aaguid,
         chain=[_cn(c) for c in path],
         user_verified=ad.is_user_verified(),
+        model=model,
     )

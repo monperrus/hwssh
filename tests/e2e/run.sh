@@ -18,18 +18,21 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"; docker rm -f $NAME >/dev/null 2>&1' EXIT
 SSH=(ssh -F /dev/null -p "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
      -o LogLevel=ERROR -o ConnectTimeout=5)
 
-# Build context: registry with the real fixture (verified with built-in Yubico roots)
+# Build context: registry with the real fixture (verified with built-in Yubico roots and FIDO MDS)
 # plus a forged entry; a plain key in alice's ~/.ssh/authorized_keys.
 rm -rf $E2E/registry && mkdir -p $E2E/registry/alice
 ssh-keygen -q -t ed25519 -N '' -f "$tmp/plain" -C plain
 cp "$tmp/plain.pub" $E2E/plain_authorized_keys
 forged=$E2E/registry/alice/$(printf '%064d' 0)
 cp "$tmp/plain.pub" "$forged.pub"; printf x > "$forged.attest"; printf x > "$forged.challenge"
+if [[ ! -f tests/fixtures/mds.jwt ]]; then
+  uv run -q hwssh mds-update tests/fixtures/mds.jwt || { echo "FAIL: no FIDO MDS blob"; exit 1; }
+fi
 enrolled=0
 if [[ -f $FIX/attest.bin ]]; then
-  if uv run -q hwssh enroll $E2E/registry alice $FIX/id_ed25519_sk.pub $FIX/attest.bin $FIX/challenge.bin; then
+  if uv run -q hwssh enroll --mds tests/fixtures/mds.jwt $E2E/registry alice $FIX/id_ed25519_sk.pub $FIX/attest.bin $FIX/challenge.bin; then
     enrolled=1; ok
-  else bad "real YubiKey fixture does not enroll with built-in roots"; fi
+  else bad "real YubiKey fixture does not enroll with built-in roots and MDS"; fi
 else
   echo "note: no $FIX/attest.bin, hardware positive skipped"
 fi
@@ -48,12 +51,16 @@ for want in "passwordauthentication no" "kbdinteractiveauthentication no" "autho
 done
 
 # 2. registry as sshd sees it: only the attested key, the forged entry is rejected
-keys=$(docker exec -u nobody $NAME /usr/local/bin/hwssh authorized-keys /etc/hwssh/registry alice 2>"$tmp/ak.err")
+ak=$(grep '^AuthorizedKeysCommand ' config/sshd_config | sed 's/^AuthorizedKeysCommand //; s/%u/alice/')
+keys=$(docker exec -u nobody $NAME $ak 2>"$tmp/ak.err")
 [[ $(grep -c . <<<"$keys") -eq $enrolled ]] && ok || bad "authorized-keys printed: $keys"
 grep -q "rejecting .*$(printf '%064d' 0)" "$tmp/ak.err" && ok || bad "forged registry entry not rejected"
 if [[ $enrolled == 1 ]]; then
   grep -qF "$(cut -d' ' -f2 $FIX/id_ed25519_sk.pub)" <<<"$keys" && ok || bad "fixture key not served"
 fi
+# fail closed: without the FIDO metadata blob, no key is served
+none=$(docker exec -u nobody $NAME ${ak/\/var\/lib\/hwssh\/mds.jwt//nonexistent} 2>/dev/null)
+[[ -z $none ]] && ok || bad "keys served without MDS blob: $none"
 docker exec $NAME hwssh verify-registry /etc/hwssh/registry >/dev/null 2>&1 \
   && bad "verify-registry accepted a forged entry" || ok
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from cryptography import x509
 
-from hwssh import _registry
+from hwssh import _mds, _registry
 from hwssh._attest import AttestationError, TrustStore, VerifiedKey, verify_attestation
 
 EPILOG = """\
@@ -22,11 +22,12 @@ enrollment, on the client:
   hwssh challenge chal.bin          # or a challenge issued by the server admin
   ssh-keygen -t ed25519-sk -O verify-required \\
       -O challenge=chal.bin -O write-attestation=attest.bin -f ~/.ssh/id_ed25519_sk
-then on the server:
-  hwssh enroll /etc/hwssh/registry alice ~/.ssh/id_ed25519_sk.pub attest.bin chal.bin
+then on the server (mds-update daily, e.g. from cron):
+  hwssh mds-update /var/lib/hwssh/mds.jwt
+  hwssh enroll --mds /var/lib/hwssh/mds.jwt /etc/hwssh/registry alice ~/.ssh/id_ed25519_sk.pub attest.bin chal.bin
 sshd_config:
   AuthorizedKeysFile none
-  AuthorizedKeysCommand /usr/local/bin/hwssh authorized-keys /etc/hwssh/registry %u
+  AuthorizedKeysCommand /usr/local/bin/hwssh authorized-keys --mds /var/lib/hwssh/mds.jwt /etc/hwssh/registry %u
   AuthorizedKeysCommandUser nobody
 exit codes: 0 ok, 1 not proven hardware / failed check, 2 usage error
 """
@@ -41,6 +42,10 @@ def _store(args: argparse.Namespace) -> TrustStore | None:
     return TrustStore(roots)
 
 
+def _mds_of(args: argparse.Namespace) -> _mds.Mds | None:
+    return _mds.load(Path(args.mds)) if args.mds else None
+
+
 def _record(v: VerifiedKey, **extra: Any) -> dict[str, Any]:
     d = {
         "fingerprint": v.key.fingerprint,
@@ -49,6 +54,7 @@ def _record(v: VerifiedKey, **extra: Any) -> dict[str, Any]:
         "aaguid": v.aaguid,
         "chain": v.chain,
         "user_verified": v.user_verified,
+        "model": v.model,
     }
     d.update(extra)
     return d
@@ -66,6 +72,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         Path(args.challenge).read_bytes(),
         store=_store(args),
         require_uv=args.require_uv,
+        mds=_mds_of(args),
     )
     if args.json:
         print(json.dumps(_record(v)))
@@ -81,6 +88,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
         Path(args.challenge).read_bytes(),
         store=_store(args),
         require_uv=args.require_uv,
+        mds=_mds_of(args),
     )
     if args.json:
         print(json.dumps(_record(v, user=args.user, entry=str(stem))))
@@ -89,10 +97,11 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 
 def cmd_verify_registry(args: argparse.Namespace) -> int:
     store = _store(args)
+    mds = _mds_of(args)
     results = []
     for e in _registry.entries(Path(args.registry)):
         try:
-            v = e.verify(store, require_uv=args.require_uv)
+            v = e.verify(store, require_uv=args.require_uv, mds=mds)
             results.append(_record(v, user=e.user, entry=str(e.stem), ok=True))
         except AttestationError as err:
             results.append({"user": e.user, "entry": str(e.stem), "ok": False, "error": str(err)})
@@ -107,13 +116,28 @@ def cmd_verify_registry(args: argparse.Namespace) -> int:
 
 def cmd_authorized_keys(args: argparse.Namespace) -> int:
     store = _store(args)
+    mds = _mds_of(args)
     for e in _registry.entries(Path(args.registry), args.user):
         try:
-            v = e.verify(store, require_uv=args.require_uv)
+            v = e.verify(store, require_uv=args.require_uv, mds=mds)
         except AttestationError as err:
             print(f"hwssh: rejecting {e.stem}: {err}", file=sys.stderr)
             continue
         print(f"verify-required {v.key.openssh()} hwssh:{e.stem.name[:16]}")
+    return 0
+
+
+def cmd_mds_update(args: argparse.Namespace) -> int:
+    blob = _mds.fetch(args.url)
+    m = _mds.verify_blob(blob)  # never store an unverified blob
+    out = Path(args.out)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_bytes(blob)
+    tmp.chmod(0o644)
+    tmp.replace(out)
+    if args.json:
+        print(json.dumps({"no": m.payload["no"], "nextUpdate": m.payload["nextUpdate"],
+                          "entries": len(m.payload["entries"]), "path": str(out)}))
     return 0
 
 
@@ -134,7 +158,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-uv", action="store_true",
         help="also require the user-verification (PIN/biometric) flag at enrollment",
     )
+    common.add_argument(
+        "--mds", metavar="JWT",
+        help="also require the model to be listed, uncompromised, in this FIDO MDS3 blob",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("mds-update", help="download and verify the FIDO MDS3 blob, store it")
+    c.add_argument("out")
+    c.add_argument("--url", default=_mds.MDS_URL)
+    c.add_argument("--json", action="store_true", help="machine-readable output")
+    c.set_defaults(func=cmd_mds_update)
 
     c = sub.add_parser("challenge", help="write a fresh 32-byte challenge file")
     c.add_argument("out")
