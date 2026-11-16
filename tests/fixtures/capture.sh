@@ -7,5 +7,6 @@ d="$(dirname "$0")/${1:-yubikey}"
 mkdir -p "$d"
 rm -f "$d"/id_ed25519_sk "$d"/id_ed25519_sk.pub "$d"/attest.bin
 head -c 32 /dev/urandom > "$d/challenge.bin"
-ssh-keygen -q -t ed25519-sk -O verify-required -N '' -C hwssh-fixture \
+echo "Enter the FIDO2 PIN if asked, then touch the YubiKey when it blinks." >&2
+ssh-keygen -t ed25519-sk -O verify-required -N '' -C hwssh-fixture \
   -O challenge="$d/challenge.bin" -O write-attestation="$d/attest.bin" -f "$d/id_ed25519_sk"
