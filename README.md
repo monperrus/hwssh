@@ -1,16 +1,10 @@
 # hwssh — provably hardware SSH keys
 
-An SSH server configured with hwssh admits only keys whose private key was **generated inside
-a FIDO2 authenticator**, proven by a verified attestation chain to a pinned vendor root.
+An SSH server configured with hwssh admits only keys whose private key was generated inside
+a FIDO2 authenticator, proven by a verified attestation chain to a pinned vendor root.
 Every admitted key is stored with its attestation, so anyone can re-verify the claim offline.
 
-Background: [Provable hardware wallets](https://www.monperrus.net/martin/provable-hardware-wallets).
-
-## Why the key type is not enough
-
-`sk-ssh-ed25519@openssh.com` keys *usually* live on a security key, but OpenSSH loads any
-middleware via `SSH_SK_PROVIDER`, so software can produce such keys. OpenSSH never checks the
-attestation it can write at enrollment. hwssh does, and sshd only sees keys that pass.
+See <https://www.monperrus.net/martin/provably-hardware-ssh-protection>
 
 ## Usage
 
