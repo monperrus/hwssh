@@ -6,3 +6,6 @@ tests/e2e/registry/
 tests/e2e/plain_authorized_keys
 tests/fixtures/*/id_ed25519_sk
 tests/fixtures/mds.jwt
+blog/
+taste.md
+memory/
