@@ -23,9 +23,14 @@ def load() -> tuple[str, bytes, bytes]:
 
 
 def test_real_key_proven_hardware() -> None:
-    v = verify_attestation(*load(), require_uv=True)
+    v = verify_attestation(*load())
     assert v.chain[0].startswith("Yubico") and v.chain[-1].startswith("Yubico")
-    assert v.user_verified
+
+
+def test_real_key_enrolled_without_pin() -> None:
+    # The fixture is unattended (no PIN at enrollment): requiring UV must reject it.
+    with pytest.raises(AttestationError, match="verification"):
+        verify_attestation(*load(), require_uv=True)
 
 
 def test_real_key_other_challenge() -> None:

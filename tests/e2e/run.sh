@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end: hardened sshd in docker admits only attested FIDO keys.
-#   tests/e2e/run.sh            automated checks (no touch needed)
-#   tests/e2e/run.sh --hardware also log in with the YubiKey fixture (touch + PIN)
+#   tests/e2e/run.sh            all checks; logs in with the YubiKey fixture if one is plugged in
+#   tests/e2e/run.sh --hardware same, and a missing YubiKey is a failure
+# Unattended: the fixture key needs no touch and no PIN at login.
 # Prints failures and one summary line; exit 1 if any check fails.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -45,7 +46,7 @@ for _ in $(seq 50); do "${SSH[@]}" -o BatchMode=yes nobody@127.0.0.1 true 2>&1 |
 # 1. sshd effective config
 cfg=$(docker exec $NAME sshd -T)
 for want in "passwordauthentication no" "kbdinteractiveauthentication no" "authorizedkeysfile none" \
-            "authenticationmethods publickey" "pubkeyauthoptions verify-required" \
+            "authenticationmethods publickey" "pubkeyauthoptions none" \
             "pubkeyacceptedalgorithms sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com"; do
   grep -qx "$want" <<<"$cfg" && ok || bad "sshd -T lacks '$want'"
 done
@@ -73,13 +74,15 @@ out=$(SSHPASS=hunter2 sshpass -e "${SSH[@]}" -o PreferredAuthentications=passwor
       -o PubkeyAuthentication=no alice@127.0.0.1 echo in 2>&1)
 [[ $out == *"Permission denied (publickey)"* ]] && ok || bad "password: $out"
 
-# 5. hardware login (touch + PIN), only with --hardware
-if [[ $HW == --hardware ]]; then
-  if [[ $enrolled == 1 ]]; then
-    echo "touch the YubiKey and enter its PIN when asked"
-    out=$("${SSH[@]}" -o IdentitiesOnly=yes -o IdentityAgent=none -i $FIX/id_ed25519_sk alice@127.0.0.1 echo hwssh-in 2>&1 </dev/tty)
-    [[ $out == *hwssh-in* ]] && ok || bad "YubiKey login: $out"
-  else bad "--hardware needs the fixture"; fi
+# 5. hardware login, unattended, when the YubiKey is plugged in
+if [[ $enrolled == 1 && -f $FIX/id_ed25519_sk ]] && fido2-token -L 2>/dev/null | grep -q .; then
+  out=$("${SSH[@]}" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+        -i $FIX/id_ed25519_sk alice@127.0.0.1 echo hwssh-in 2>&1 </dev/null)
+  [[ $out == *hwssh-in* ]] && ok || bad "YubiKey login: $out"
+elif [[ $HW == --hardware ]]; then
+  bad "--hardware needs the fixture, its key handle and a plugged-in YubiKey"
+else
+  echo "note: no YubiKey plugged in, hardware login skipped"
 fi
 
 echo "e2e: $((n-fail))/$n passed"

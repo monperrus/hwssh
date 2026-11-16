@@ -14,11 +14,11 @@ attestation it can write at enrollment. hwssh does, and sshd only sees keys that
 
 ## Usage
 
-Client (enrollment, touch + PIN):
+Client (enrollment, one touch):
 
 ```sh
 hwssh challenge chal.bin
-ssh-keygen -t ed25519-sk -O verify-required \
+ssh-keygen -t ed25519-sk -O no-touch-required \
     -O challenge=chal.bin -O write-attestation=attest.bin -f ~/.ssh/id_ed25519_sk
 ```
 
@@ -35,7 +35,9 @@ sshd: use [`config/sshd_config`](config/sshd_config). Keys come only from
 `AuthorizedKeysCommand hwssh authorized-keys`, which re-verifies each entry at every login;
 without a fresh FIDO metadata blob no key is served (fail closed);
 `AuthorizedKeysFile none`, passwords, keyboard-interactive and non-`sk` algorithms are off,
-and `PubkeyAuthOptions verify-required` demands PIN/biometric on every login.
+No touch or PIN is demanded at login (`PubkeyAuthOptions none`, keys served with
+`no-touch-required`), so the key works unattended; `authorized-keys --options verify-required`
+demands a PIN instead.
 
 All commands are silent on success, write errors to stderr, exit 1 when hardware is not
 proven, and take `--json`.
@@ -71,9 +73,10 @@ proven, and take `--json`.
 uv sync
 uv run hwssh mds-update tests/fixtures/mds.jwt   # real FIDO metadata for tests (git-ignored)
 uv run pytest                     # synthetic CA positives/negatives, real key and real MDS
-tests/fixtures/capture.sh         # capture a real YubiKey attestation (touch + PIN)
-tests/e2e/run.sh                  # docker sshd: password, plain key, forged entry refused
-tests/e2e/run.sh --hardware       # ... and the YubiKey logs in (touch + PIN)
+tests/fixtures/capture.sh         # capture a real YubiKey attestation (one touch)
+tests/e2e/run.sh                  # docker sshd: password, plain key, forged entry refused;
+                                  # YubiKey logs in unattended if plugged in
+tests/e2e/run.sh --hardware       # same, a missing YubiKey is a failure
 ```
 
 License: MIT.

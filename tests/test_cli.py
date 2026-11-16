@@ -54,7 +54,7 @@ def test_enroll_then_authorized_keys(env, capsys) -> None:  # type: ignore[no-un
     assert capsys.readouterr() == ("", "")
     assert main(["authorized-keys", "--roots", str(roots), str(reg), "alice"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert len(out) == 1 and out[0].startswith("verify-required sk-ssh-ed25519@openssh.com ")
+    assert len(out) == 1 and out[0].startswith("no-touch-required sk-ssh-ed25519@openssh.com ")
     assert main(["authorized-keys", "--roots", str(roots), str(reg), "bob"]) == 0
     assert capsys.readouterr().out == ""
 

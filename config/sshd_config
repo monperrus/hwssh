@@ -4,11 +4,12 @@
 Port 22
 HostKey /etc/ssh/ssh_host_ed25519_key
 
-# Only public-key auth, only FIDO (sk-*) algorithms, PIN/biometric on every login.
+# Only public-key auth, only FIDO (sk-*) algorithms. No touch or PIN is demanded at login:
+# hardware-ness comes from the attestation, so unattended keys (no-touch-required) work.
 AuthenticationMethods publickey
 PubkeyAuthentication yes
 PubkeyAcceptedAlgorithms sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com
-PubkeyAuthOptions verify-required
+PubkeyAuthOptions none
 
 # Keys come only from the registry, re-verified at each login against the pinned vendor roots
 # and the FIDO metadata blob (refresh daily: hwssh mds-update /var/lib/hwssh/mds.jwt).

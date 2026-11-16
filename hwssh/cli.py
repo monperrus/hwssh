@@ -20,7 +20,7 @@ from hwssh._attest import AttestationError, TrustStore, VerifiedKey, verify_atte
 EPILOG = """\
 enrollment, on the client:
   hwssh challenge chal.bin          # or a challenge issued by the server admin
-  ssh-keygen -t ed25519-sk -O verify-required \\
+  ssh-keygen -t ed25519-sk -O no-touch-required \\
       -O challenge=chal.bin -O write-attestation=attest.bin -f ~/.ssh/id_ed25519_sk
 then on the server (mds-update daily, e.g. from cron):
   hwssh mds-update /var/lib/hwssh/mds.jwt
@@ -123,7 +123,8 @@ def cmd_authorized_keys(args: argparse.Namespace) -> int:
         except AttestationError as err:
             print(f"hwssh: rejecting {e.stem}: {err}", file=sys.stderr)
             continue
-        print(f"verify-required {v.key.openssh()} hwssh:{e.stem.name[:16]}")
+        opts = f"{args.options} " if args.options else ""
+        print(f"{opts}{v.key.openssh()} hwssh:{e.stem.name[:16]}")
     return 0
 
 
@@ -196,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
                        help="print verified keys of USER, for sshd AuthorizedKeysCommand")
     c.add_argument("registry")
     c.add_argument("user")
+    c.add_argument(
+        "--options", default="no-touch-required",
+        help="authorized_keys options before each key (default: %(default)s, allows unattended "
+             "keys; use verify-required to demand PIN, '' to demand touch)",
+    )
     c.set_defaults(func=cmd_authorized_keys)
     return p
 
